@@ -223,6 +223,9 @@ describe('client test', function () {
   describe('function should ok', function () {
     const functionName = 'hello-world';
     const initFunctionName = 'counter';
+    const functionWithBufResp = "test-buf-resp"
+    const functionWithHandledErr = "test-func-with-handled-err"
+    const functionWithUnhandledErr = "test-func-with-unhandled-err"
     const client = new FunctionComputeClient(ACCOUNT_ID, {
       accessKeyID: ACCESS_KEY_ID,
       accessKeySecret: ACCESS_KEY_SECRET,
@@ -231,6 +234,11 @@ describe('client test', function () {
 
     before(async function () {
       // clean up
+      try {
+        await client.deleteService(serviceName)
+      } catch (ex) {
+        // Ignore
+      }
       const service = await client.createService(serviceName);
       expect(service.data).to.be.ok();
       expect(service.data).to.have.property('serviceName', serviceName);
@@ -238,6 +246,9 @@ describe('client test', function () {
 
     after(async function () {
       try {
+        await client.deleteFunction(serviceName, functionWithBufResp);
+        await client.deleteFunction(serviceName, functionWithHandledErr);
+        await client.deleteFunction(serviceName, functionWithUnhandledErr);
         await client.deleteFunction(serviceName, functionName);
       } catch (ex) {
         // Ignore
@@ -345,6 +356,65 @@ describe('client test', function () {
     it('invokeFunction should faster', async function () {
       const response = await client.invokeFunction(serviceName, functionName, Buffer.from('world'));
       expect(response.data).to.be('hello world');
+    });
+
+    it('invokeFunction with buffer response should be ok', async function () {
+      const func = await client.createFunction(serviceName, {
+        functionName: functionWithBufResp,
+        description: 'function desc',
+        memorySize: 128,
+        handler: 'main.test_buf',
+        runtime: 'nodejs6',
+        timeout: 10,
+        code: {
+          zipFile: fs.readFileSync(path.join(__dirname, 'figures/test.zip'), 'base64')
+        }
+      });
+      expect(func.data).to.be.ok();
+      expect(func.data).to.have.property('functionName', functionWithBufResp);
+
+      const response = await client.invokeFunction(serviceName, functionWithBufResp, Buffer.from('world'), {}, 'LATEST', true);
+      expect(response.data).an(Buffer)
+      expect(response.data.toString()).to.be('world');
+    });
+
+    it('invokeFunction with handled error should decode with utf8', async function () {
+      const func = await client.createFunction(serviceName, {
+        functionName: functionWithHandledErr,
+        description: 'function desc',
+        memorySize: 128,
+        handler: 'main.test_buf_handled_err',
+        runtime: 'nodejs6',
+        timeout: 10,
+        code: {
+          zipFile: fs.readFileSync(path.join(__dirname, 'figures/test.zip'), 'base64')
+        }
+      });
+      expect(func.data).to.be.ok();
+      expect(func.data).to.have.property('functionName', functionWithHandledErr);
+
+      const response = await client.invokeFunction(serviceName, functionWithHandledErr, Buffer.from('world'), {}, 'LATEST', true);
+      expect(response.data).an(Object)
+      expect(JSON.stringify(response.data)).to.be(JSON.stringify({ 'errorMessage': 'This is a handled error' }));
+    });
+
+    it('invokeFunction with unhandled error should decode with utf8', async function () {
+      const func = await client.createFunction(serviceName, {
+        functionName: functionWithUnhandledErr,
+        description: 'function desc',
+        memorySize: 128,
+        handler: 'main.test_buf_unhandled_err',
+        runtime: 'nodejs6',
+        timeout: 10,
+        code: {
+          zipFile: fs.readFileSync(path.join(__dirname, 'figures/test.zip'), 'base64')
+        }
+      });
+      expect(func.data).to.be.ok();
+      expect(func.data).to.have.property('functionName', functionWithUnhandledErr);
+
+      const response = await client.invokeFunction(serviceName, functionWithUnhandledErr, Buffer.from('world'), {}, 'LATEST', true);
+      expect(response.data).an(Object)
     });
 
     it('invokeFunction async should ok', async function () {
@@ -734,7 +804,8 @@ describe('client test', function () {
         {
           'additionalVersionWeight': {
             '2': 0.3
-          }
+          },
+          'description': ''
         }
       );
       expect(res.data.aliasName).to.be(aliasName);
